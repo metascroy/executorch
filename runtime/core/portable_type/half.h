@@ -681,6 +681,11 @@ std::ostream& operator<<(std::ostream& out, const Half& value);
 
 namespace std {
 
+// placeholder
+static inline bool isfinite(torch::executor::Half) {
+  return true;
+}
+
 template <>
 class numeric_limits<torch::executor::Half> {
  public:
