@@ -144,12 +144,15 @@ class LlamaEdgeManager:
         self.export_program = None
         self.output_dir = "."
 
-    def set_metadata(self, metadata: Optional[dict]) -> "LlamaEdgeManager":
+    def set_metadata(self, metadata: Optional[Union[dict, str]]) -> "LlamaEdgeManager":
         """
         Set the metadata that will be serialized into .pte file.
         Args:
             metadata (Optional[dict]): Metadata for the model.
         """
+        if isinstance(metadata, str):
+            with open(metadata, "r") as f:
+                metadata = json.load(f)
         self.metadata = metadata
         return self
 
