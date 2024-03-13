@@ -211,9 +211,31 @@ if __name__ == "__main__":
 
     model_names = [n for n in model_loader.get_model_names() if n not in [
         # Exclusion list
-        "moondream", # too much memory
-        "demucs", # too much memory
-        "timm_vision_transformer_large", # too much memory
+
+        # Skipping the following because they do not load from
+        # torchbench on my machine
+        # (e.g., they require CUDA or I'm missing a dependency)
+        "DALLE2_pytorch",
+        "doctr_det_predictor",
+        "doctr_reco_predictor",
+        "llama_v2_7b_16h",
+        "mobilenet_v2_quantized_qat",
+        "moco",
+        "resnet50_quantized_qat",
+        "sam",
+        "sam_fast",
+        "simple_gpt",
+        "simple_gpt_tp_manual",
+        "stable_diffusion_text_encoder",
+        "stable_diffusion_unet",
+        "tacotron2",
+        "timm_efficientdet",
+        "torch_multimodal_clip",
+
+        # Skipping the following because they use too much memory
+        "moondream",
+        "demucs",
+        "timm_vision_transformer_large",
     ]]
 
     delegations = ["no_backend", "xnnpack", "xnnpack_quantized", "mps", "coreml"]

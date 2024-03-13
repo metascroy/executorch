@@ -71,7 +71,7 @@ def get_to_backend_spec(delegation: str):
         from executorch.backends.apple.coreml.partition.coreml_partitioner import CoreMLPartitioner
         return ToBackendSpec(partitioner=CoreMLPartitioner(), quantizer=None)
     else:
-        raise Exception(f"No implementation for {delegation}")
+        raise NotImplementedError(f"Unknown delegation {delegation}.")
 
 @dataclass
 class _StageOutputs:
