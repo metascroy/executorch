@@ -1,13 +1,12 @@
 # Reproducing ExecuTorch errors on torchbench models
 
 1. Install torchbench models in your conda environment that is already set-up with executorch.  Installation instructions for torchbench can be found
-[here](https://github.com/pytorch/benchmark).  The relevant part of the installation instructions is:
+[here](https://github.com/pytorch/benchmark).  The relevant part of the installation instructions is shown below (note that python refers to python3).
 
 ```bash
 git clone https://github.com/pytorch/benchmark
 cd benchmark
-python install.py
-pip install git+https://www.github.com:pytorch/benchmark.git
+python install.py --continue_on_fail
 ```
 
 2. Make sure the executorch_delegation_runner.py file and the run_torchbench_delegations.py script are in the same directory as the benchmark repro you cloned in step 1.  The directory structure should be something like this:
