@@ -238,8 +238,11 @@ if __name__ == "__main__":
         "timm_vision_transformer_large",
     ]]
 
+    ###################################################
+    # TODO: SET THESE CORRECTLY
     delegations = ["no_backend", "xnnpack", "xnnpack_quantized", "mps", "coreml"]
     write_dir = f"/Users/scroy/etorch/runs/test"
+    ###################################################
 
     for delegation in delegations:
         reader_writer = ReaderWriter(write_dir, delegation)
