@@ -14,6 +14,7 @@ from torch.export import ExportedProgram
 from typing import Optional, Tuple, List, Dict
 import logging
 from collections import defaultdict
+from executorch.exir import ExecutorchProgramManager
 
 # Set up torchbench model loading
 # This script must be in the same directory as the benchmark folder
@@ -63,10 +64,10 @@ class ReaderWriter:
         with open(path, "wb") as f:
             pickle.dump(run_info, f)
 
-    def write_pte(self, pte: bytes, model_name: str):
+    def write_pte(self, executorch_program_manager: ExecutorchProgramManager, model_name: str):
         path = f"{self.directory}/{self.delegation}_{model_name}_model.pte"
         with open(path, "wb") as f:
-            f.write(pte)
+            executorch_program_manager.write_to_file(f)
 
     def write_example_inputs(self, example_inputs, model_name: str):
         path = f"{self.directory}/{self.delegation}_{model_name}_ex_inputs.pt"
@@ -129,7 +130,7 @@ def run(model_loader, delegation, model_names, reader_writer, skip_existing):
 
             reader_writer.write_run_info(runner.run_info(), model_name)
             if runner.stage_outputs.buffer is not None:
-                reader_writer.write_pte(runner.stage_outputs.buffer, model_name)
+                reader_writer.write_pte(runner.stage_outputs.to_executorch, model_name)
                 reader_writer.write_example_inputs(runner.example_inputs, model_name)
                 reader_writer.write_eval_example_inputs(runner.stage_outputs.eval_inputs, model_name)
 
