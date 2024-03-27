@@ -300,7 +300,6 @@ MOBILE_MODELS = [
     "mobilenet_v3_large",
     "resnext50_32x4d",
 ]
-MOBILE_MODELS = ["resnet18"]  # @nocommit
 
 
 if __name__ == "__main__":
