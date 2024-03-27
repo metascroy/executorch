@@ -16,11 +16,13 @@
 #include <executorch/runtime/backend/interface.h>
 #include <executorch/runtime/core/error.h>
 #include <executorch/runtime/core/evalue.h>
+#include <executorch/runtime/core/exec_aten/util/tensor_util.h>
 #include <executorch/runtime/platform/compiler.h>
 #include <executorch/runtime/platform/profiler.h>
 
 #include <cstdio>
 #include <cstdlib> /* strtol */
+#include <cstring>
 #include <memory>
 #include <type_traits>
 #include <vector>
@@ -56,10 +58,75 @@ const uint8_t* getConstantDataPtr(
 
 api::ScalarType get_scalar_type(const vkgraph::VkDataType& vk_datatype) {
   switch (vk_datatype) {
-    case (vkgraph::VkDataType::fp32): {
+    case vkgraph::VkDataType::BOOL:
+      return api::kBool;
+    case vkgraph::VkDataType::UINT8:
+      return api::kByte;
+    case vkgraph::VkDataType::INT8:
+      return api::kChar;
+    case vkgraph::VkDataType::INT32:
+      return api::kInt;
+    case vkgraph::VkDataType::FLOAT16:
+      return api::kHalf;
+    case vkgraph::VkDataType::FLOAT32:
       return api::kFloat;
+  }
+}
+
+api::StorageType get_storage_type(
+    const vkgraph::VkStorageType& vk_storage_type) {
+  switch (vk_storage_type) {
+    case vkgraph::VkStorageType::BUFFER:
+      return api::StorageType::BUFFER;
+    case vkgraph::VkStorageType::TEXTURE_3D:
+      return api::StorageType::TEXTURE_3D;
+    case vkgraph::VkStorageType::TEXTURE_2D:
+      return api::StorageType::TEXTURE_2D;
+    default:
+      break;
+  }
+  return api::StorageType::UNKNOWN;
+}
+
+api::GPUMemoryLayout get_memory_layout(
+    const vkgraph::VkMemoryLayout& vk_memory_layout) {
+  switch (vk_memory_layout) {
+    case vkgraph::VkMemoryLayout::TENSOR_WIDTH_PACKED:
+      return api::GPUMemoryLayout::TENSOR_WIDTH_PACKED;
+    case vkgraph::VkMemoryLayout::TENSOR_HEIGHT_PACKED:
+      return api::GPUMemoryLayout::TENSOR_HEIGHT_PACKED;
+    case vkgraph::VkMemoryLayout::TENSOR_CHANNELS_PACKED:
+      return api::GPUMemoryLayout::TENSOR_CHANNELS_PACKED;
+    default:
+      break;
+  }
+  VK_THROW("Invalid memory layout encountered!");
+}
+
+GraphConfig get_graph_config(ArrayRef<CompileSpec>& compile_specs) {
+  GraphConfig config = GraphConfig();
+
+  for (const CompileSpec& spec : compile_specs) {
+    const uint8_t* value_data = (const uint8_t*)spec.value.buffer;
+    const size_t value_size = spec.value.nbytes;
+    if (strcmp(spec.key, "storage_type_override") == 0) {
+      ET_CHECK_MSG(value_size == sizeof(int32_t), "Unexpected value size!");
+      int value_as_int = static_cast<int>(GetUInt32LE(value_data));
+      api::StorageType storage_type =
+          static_cast<api::StorageType>(value_as_int);
+
+      config.setStorageTypeOverride(storage_type);
+    }
+    if (strcmp(spec.key, "memory_layout_override") == 0) {
+      ET_CHECK_MSG(value_size == sizeof(uint32_t), "Unexpected value size!");
+      uint32_t value_as_int = GetUInt32LE(value_data);
+      api::GPUMemoryLayout memory_layout =
+          static_cast<api::GPUMemoryLayout>(value_as_int);
+
+      config.setMemoryLayoutOverride(memory_layout);
     }
   }
+  return config;
 }
 
 class GraphBuilder {
@@ -99,9 +166,18 @@ class GraphBuilder {
 
   void add_tensor_to_graph(const uint32_t fb_id, VkTensorPtr tensor_fb) {
     const api::ScalarType& dtype = get_scalar_type(tensor_fb->datatype());
+    api::StorageType storage_type =
+        tensor_fb->storage_type() == vkgraph::VkStorageType::DEFAULT_STORAGE
+        ? compute_graph_->suggested_storage_type()
+        : get_storage_type(tensor_fb->storage_type());
 
     UIntVector dims_fb = tensor_fb->dims();
     const std::vector<int64_t> dims_vector(dims_fb->cbegin(), dims_fb->cend());
+
+    api::GPUMemoryLayout memory_layout =
+        tensor_fb->memory_layout() == vkgraph::VkMemoryLayout::DEFAULT_LAYOUT
+        ? compute_graph_->suggested_memory_layout(dims_vector)
+        : get_memory_layout(tensor_fb->memory_layout());
 
     ValueRef ref;
     if (tensor_fb->constant_id() >= 0) {
@@ -111,9 +187,18 @@ class GraphBuilder {
       ref = compute_graph_->add_tensorref(dims_vector, dtype, tensor_data);
     } else {
       ref = compute_graph_->add_tensor(
-          dims_vector, dtype, tensor_fb->mem_obj_id());
+          dims_vector,
+          dtype,
+          storage_type,
+          memory_layout,
+          tensor_fb->mem_obj_id());
     }
 
+    ref_mapping_[fb_id] = ref;
+  }
+
+  void add_none_to_graph(const uint32_t fb_id) {
+    ValueRef ref = compute_graph_->add_none();
     ref_mapping_[fb_id] = ref;
   }
 
@@ -121,6 +206,20 @@ class GraphBuilder {
   typename std::enable_if<is_valid_scalar_type<T>::value, void>::type
   add_scalar_to_graph(const uint32_t fb_id, T value) {
     ValueRef ref = compute_graph_->add_scalar(value);
+    ref_mapping_[fb_id] = ref;
+  }
+
+  template <typename T>
+  typename std::enable_if<is_valid_scalar_type<T>::value, void>::type
+  add_scalar_list_to_graph(const uint32_t fb_id, std::vector<T>&& value) {
+    ValueRef ref = compute_graph_->add_scalar_list(std::move(value));
+    ref_mapping_[fb_id] = ref;
+  }
+
+  void add_value_list_to_graph(
+      const uint32_t fb_id,
+      std::vector<ValueRef>&& value) {
+    ValueRef ref = compute_graph_->add_value_list(std::move(value));
     ref_mapping_[fb_id] = ref;
   }
 
@@ -137,6 +236,9 @@ class GraphBuilder {
         "Trying to add a value that has already been added to the graph.");
 
     switch (value->value_type()) {
+      case vkgraph::GraphTypes::Null:
+        add_none_to_graph(fb_id);
+        break;
       case vkgraph::GraphTypes::Int:
         add_scalar_to_graph(fb_id, value->value_as_Int()->int_val());
         break;
@@ -148,6 +250,34 @@ class GraphBuilder {
         break;
       case vkgraph::GraphTypes::VkTensor:
         add_tensor_to_graph(fb_id, value->value_as_VkTensor());
+        break;
+      case vkgraph::GraphTypes::IntList:
+        add_scalar_list_to_graph(
+            fb_id,
+            std::vector<int64_t>(
+                value->value_as_IntList()->items()->cbegin(),
+                value->value_as_IntList()->items()->cend()));
+        break;
+      case vkgraph::GraphTypes::DoubleList:
+        add_scalar_list_to_graph(
+            fb_id,
+            std::vector<double>(
+                value->value_as_DoubleList()->items()->cbegin(),
+                value->value_as_DoubleList()->items()->cend()));
+        break;
+      case vkgraph::GraphTypes::BoolList:
+        add_scalar_list_to_graph(
+            fb_id,
+            std::vector<bool>(
+                value->value_as_BoolList()->items()->cbegin(),
+                value->value_as_BoolList()->items()->cend()));
+        break;
+      case vkgraph::GraphTypes::ValueList:
+        add_value_list_to_graph(
+            fb_id,
+            std::vector<ValueRef>(
+                value->value_as_ValueList()->items()->cbegin(),
+                value->value_as_ValueList()->items()->cend()));
         break;
       case vkgraph::GraphTypes::String:
         add_string_to_graph(fb_id, value);
@@ -194,6 +324,68 @@ class GraphBuilder {
     }
   }
 };
+
+//
+// Execution tools
+//
+
+bool maybe_resize_input(
+    ComputeGraph* graph,
+    const size_t input_i,
+    exec_aten::Tensor& et_tensor) {
+  ValueRef in_tensor_ref = graph->inputs()[input_i].value;
+  vTensor& in_tensor = graph->get_val(in_tensor_ref).toTensor();
+
+  ET_CHECK_MSG(
+      et_tensor.dim() == in_tensor.sizes().size(),
+      "Cannot resize input tensor: old ndim %zu does not match new ndim %zu",
+      static_cast<size_t>(in_tensor.sizes().size()),
+      static_cast<size_t>(et_tensor.dim()));
+
+  bool should_resize = false;
+  std::vector<int64_t> new_sizes(et_tensor.dim());
+  for (size_t i = 0; i < et_tensor.dim(); i++) {
+    if (in_tensor.sizes()[i] != et_tensor.sizes()[i]) {
+      should_resize = true;
+    }
+    new_sizes.at(i) = et_tensor.sizes()[i];
+  }
+
+  if (should_resize) {
+    graph->resize_input(input_i, new_sizes);
+  }
+
+  ET_CHECK_MSG(
+      in_tensor.numel() == et_tensor.numel(),
+      "Vulkan tensor numel %zu does not match ET tensor numel %zu",
+      static_cast<size_t>(in_tensor.numel()),
+      static_cast<size_t>(et_tensor.numel()));
+
+  return should_resize;
+}
+
+void maybe_resize_output(
+    ComputeGraph* graph,
+    const size_t output_i,
+    exec_aten::Tensor& et_tensor) {
+  ValueRef out_tensor_ref = graph->outputs()[output_i].value;
+  vTensor& out_tensor = graph->get_val(out_tensor_ref).toTensor();
+
+  exec_aten::SizesType new_output_size[kTensorDimensionLimit];
+  size_t ndim = out_tensor.sizes().size();
+  for (int i = 0; i < ndim; ++i) {
+    new_output_size[i] = out_tensor.sizes()[i];
+  }
+
+  exec_aten::ArrayRef<exec_aten::SizesType> output_size{new_output_size, ndim};
+  Error err = resize_tensor(et_tensor, output_size);
+
+  ET_CHECK_MSG(err == Error::Ok, "Failed to resize output tensor.");
+}
+
+//
+// VulkanBackend class
+//
 
 class VulkanBackend final : public PyTorchBackendInterface {
  public:
@@ -249,11 +441,11 @@ class VulkanBackend final : public PyTorchBackendInterface {
   Result<DelegateHandle*> init(
       BackendInitContext& context,
       FreeableBuffer* processed,
-      ArrayRef<CompileSpec>) const override {
+      ArrayRef<CompileSpec> compile_specs) const override {
     ComputeGraph* compute_graph = ET_ALLOCATE_INSTANCE_OR_RETURN_ERROR(
         context.get_runtime_allocator(), ComputeGraph);
 
-    new (compute_graph) ComputeGraph(GraphConfig());
+    new (compute_graph) ComputeGraph(get_graph_config(compile_specs));
 
     Error err = compileModel(processed->data(), compute_graph);
 
@@ -273,20 +465,28 @@ class VulkanBackend final : public PyTorchBackendInterface {
     ComputeGraph* compute_graph = static_cast<ComputeGraph*>(handle);
 
     const size_t num_inputs = compute_graph->inputs().size();
+    bool should_propagate_resize = false;
     for (size_t i = 0; i < num_inputs; i++) {
+      bool was_resized =
+          maybe_resize_input(compute_graph, i, args[i]->toTensor());
+      should_propagate_resize = should_propagate_resize || was_resized;
       compute_graph->copy_into_staging(
-          compute_graph->inputs()[i],
+          compute_graph->inputs()[i].staging,
           args[i]->toTensor().const_data_ptr(),
           args[i]->toTensor().numel());
     }
 
+    if (should_propagate_resize) {
+      compute_graph->propagate_resize();
+    }
     compute_graph->execute();
 
     for (size_t i = 0; i < compute_graph->outputs().size(); i++) {
+      maybe_resize_output(compute_graph, i, args[num_inputs + i]->toTensor());
       // args holds inputs directly followed by outputs, so the i'th output
       // for compute_graph corresponds to the (i + num_inputs)'th arg
       compute_graph->copy_from_staging(
-          compute_graph->outputs()[i],
+          compute_graph->outputs()[i].staging,
           args[num_inputs + i]->toTensor().mutable_data_ptr(),
           args[num_inputs + i]->toTensor().numel());
     }

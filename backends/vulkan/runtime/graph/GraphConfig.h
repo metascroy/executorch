@@ -10,7 +10,7 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/Context.h>
+#include <ATen/native/vulkan/api/api.h>
 
 namespace at {
 namespace native {
@@ -26,8 +26,17 @@ struct GraphConfig final {
   // risk.
   float descriptorPoolSafetyFactor;
 
+  bool enableStorageTypeOverride;
+  api::StorageType storageTypeOverride;
+
+  bool enableMemoryLayoutOverride;
+  api::GPUMemoryLayout memoryLayoutOverride;
+
   // Generate a default graph config with pre-configured settings
   explicit GraphConfig();
+
+  void setStorageTypeOverride(api::StorageType storage_type);
+  void setMemoryLayoutOverride(api::GPUMemoryLayout memory_layout);
 };
 
 } // namespace vulkan

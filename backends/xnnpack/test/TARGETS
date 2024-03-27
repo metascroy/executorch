@@ -39,6 +39,7 @@ runtime.python_test(
         "//executorch/sdk:lib",
         "//executorch/sdk/bundled_program:config",
         "//executorch/sdk/bundled_program/serialize:lib",
+        "//pytorch/ao:torchao",  # @manual
     ],
     external_deps = [
         "libtorch",
@@ -72,17 +73,5 @@ runtime.python_test(
     ]),
     deps = [
         "//executorch/backends/xnnpack:xnnpack_preprocess",
-    ],
-)
-
-runtime.python_test(
-    name = "test_custom_convert_qc4w_op",
-    srcs = ["ops/test_custom_convert_to_qc4w.py"],
-    deps = [
-        "//caffe2:torch",
-        "//executorch/backends/xnnpack/operators:convert_to_qc4w",
-    ],
-    external_deps = [
-        "libtorch",
     ],
 )

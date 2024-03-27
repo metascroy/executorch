@@ -8,7 +8,7 @@
 #
 # This file should be formatted with
 # ~~~
-# cmake-format --first-comment-is-literal=True CMakeLists.txt
+# cmake-format --first-comment-is-literal=True -i ATenVulkan.cmake
 # ~~~
 # It should also be cmake-lint clean.
 #
@@ -22,21 +22,7 @@ if(NOT VULKAN_THIRD_PARTY_PATH)
   set(VULKAN_THIRD_PARTY_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../third-party)
 endif()
 
-# Shader Codegen
-
-# Trigger Shader code generation
-set(USE_VULKAN ON)
-set(VULKAN_CODEGEN_CMAKE_PATH ${PYTORCH_PATH}/cmake/VulkanCodegen.cmake)
-if(NOT EXISTS ${VULKAN_CODEGEN_CMAKE_PATH})
-  message(
-    FATAL_ERROR
-      "Cannot perform SPIR-V codegen because " ${VULKAN_CODEGEN_CMAKE_PATH}
-      " does not exist. Please make sure that submodules are initialized"
-      " and updated.")
-endif()
-include(${PYTORCH_PATH}/cmake/VulkanCodegen.cmake)
-
-# Source paths and compile settings
+# Source file paths
 
 set(ATEN_PATH ${PYTORCH_PATH}/aten/src)
 set(ATEN_VULKAN_PATH ${ATEN_PATH}/ATen/native/vulkan)
@@ -45,6 +31,8 @@ set(VULKAN_HEADERS_PATH ${VULKAN_THIRD_PARTY_PATH}/Vulkan-Headers/include)
 set(VOLK_PATH ${VULKAN_THIRD_PARTY_PATH}/volk)
 set(VMA_PATH ${VULKAN_THIRD_PARTY_PATH}/VulkanMemoryAllocator)
 
+# Compile settings
+
 set(VULKAN_CXX_FLAGS "")
 list(APPEND VULKAN_CXX_FLAGS "-DUSE_VULKAN_API")
 list(APPEND VULKAN_CXX_FLAGS "-DUSE_VULKAN_WRAPPER")
@@ -52,11 +40,10 @@ list(APPEND VULKAN_CXX_FLAGS "-DUSE_VULKAN_VOLK")
 list(APPEND VULKAN_CXX_FLAGS "-DVK_NO_PROTOTYPES")
 list(APPEND VULKAN_CXX_FLAGS "-DVOLK_DEFAULT_VISIBILITY")
 
-# vulkan_api_lib
+# vulkan_api source files
 
-file(GLOB VULKAN_API_CPP ${ATEN_VULKAN_PATH}/api/*.cpp)
-
-add_library(vulkan_api_lib STATIC ${VULKAN_API_CPP} ${VOLK_PATH}/volk.c)
+file(GLOB vulkan_api_cpp ${ATEN_VULKAN_PATH}/api/*.cpp)
+list(APPEND vulkan_api_cpp ${VOLK_PATH}/volk.c)
 
 set(VULKAN_API_HEADERS)
 list(APPEND VULKAN_API_HEADERS ${ATEN_PATH})
@@ -64,20 +51,55 @@ list(APPEND VULKAN_API_HEADERS ${VULKAN_HEADERS_PATH})
 list(APPEND VULKAN_API_HEADERS ${VOLK_PATH})
 list(APPEND VULKAN_API_HEADERS ${VMA_PATH})
 
-target_include_directories(vulkan_api_lib PRIVATE ${VULKAN_API_HEADERS})
+# Find GLSL compiler executable
 
-target_compile_options(vulkan_api_lib PRIVATE ${VULKAN_CXX_FLAGS})
+if(ANDROID)
+  if(NOT ANDROID_NDK)
+    message(FATAL_ERROR "ANDROID_NDK not set")
+  endif()
 
-# vulkan_shader_lib
+  set(GLSLC_PATH
+      "${ANDROID_NDK}/shader-tools/${ANDROID_NDK_HOST_SYSTEM_NAME}/glslc")
+else()
+  find_program(
+    GLSLC_PATH glslc
+    PATHS ENV VULKAN_SDK "$ENV{VULKAN_SDK}/${CMAKE_HOST_SYSTEM_PROCESSOR}/bin"
+          "$ENV{VULKAN_SDK}/bin")
 
-file(GLOB VULKAN_IMPL_CPP ${ATEN_VULKAN_PATH}/impl/*.cpp)
+  if(NOT GLSLC_PATH)
+    message(FATAL_ERROR "USE_VULKAN glslc not found")
+  endif()
+endif()
 
-add_library(vulkan_shader_lib STATIC ${VULKAN_IMPL_CPP} ${vulkan_generated_cpp})
+# Required to enable linking with --whole-archive
+include(${EXECUTORCH_ROOT}/build/Utils.cmake)
 
-list(APPEND VULKAN_API_HEADERS ${CMAKE_BINARY_DIR}/vulkan)
+# Convenience macro to generate a SPIR-V shader library target. Given the path
+# to the shaders to compile and the name of the library, it will create a static
+# library containing the generated SPIR-V shaders. The generated_spv_cpp
+# variable can be used to reference the generated CPP file outside the macro.
+macro(VULKAN_SHADER_LIBRARY shaders_path library_name)
+  set(VULKAN_SHADERGEN_ENV "")
+  set(VULKAN_SHADERGEN_OUT_PATH ${CMAKE_BINARY_DIR}/${library_name})
 
-target_include_directories(vulkan_shader_lib PRIVATE ${VULKAN_API_HEADERS})
+  execute_process(
+    COMMAND
+      "${PYTHON_EXECUTABLE}" ${PYTORCH_PATH}/tools/gen_vulkan_spv.py --glsl-path
+      ${shaders_path} --output-path ${VULKAN_SHADERGEN_OUT_PATH}
+      --glslc-path=${GLSLC_PATH} --tmp-dir-path=${VULKAN_SHADERGEN_OUT_PATH}
+      --env ${VULKAN_GEN_ARG_ENV}
+    RESULT_VARIABLE error_code)
+  set(ENV{PYTHONPATH} ${PYTHONPATH})
 
-target_link_libraries(vulkan_shader_lib vulkan_api_lib)
+  set(generated_spv_cpp ${VULKAN_SHADERGEN_OUT_PATH}/spv.cpp)
 
-target_compile_options(vulkan_shader_lib PRIVATE ${VULKAN_CXX_FLAGS})
+  add_library(${library_name} STATIC ${generated_spv_cpp})
+  target_include_directories(${library_name} PRIVATE ${COMMON_INCLUDES})
+  target_link_libraries(${library_name} vulkan_graph_lib)
+  target_compile_options(${library_name} PRIVATE ${VULKAN_CXX_FLAGS})
+  # Link this library with --whole-archive due to dynamic shader registrations
+  target_link_options_shared_lib(${library_name})
+
+  unset(VULKAN_SHADERGEN_ENV)
+  unset(VULKAN_SHADERGEN_OUT_PATH)
+endmacro()

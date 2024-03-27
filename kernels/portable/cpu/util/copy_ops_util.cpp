@@ -114,6 +114,7 @@ bool check_cat_args(
   // Ensure dim is in range.
   ET_LOG_AND_RETURN_IF_FALSE(
       tensors[ref_i].numel() == 0 || tensors[ref_i].dim() > dim);
+  ET_LOG_AND_RETURN_IF_FALSE(dim >= 0);
 
   return true;
 }
@@ -378,6 +379,7 @@ bool check_slice_copy_args(
     int64_t dim,
     int64_t step,
     Tensor& out) {
+  ET_LOG_AND_RETURN_IF_FALSE(in.dim() > 0);
   ET_LOG_AND_RETURN_IF_FALSE(tensors_have_same_dtype(in, out));
   ET_LOG_AND_RETURN_IF_FALSE(tensor_has_dim(in, dim));
   ET_LOG_MSG_AND_RETURN_IF_FALSE(
@@ -737,6 +739,8 @@ bool check_unsqueeze_copy_args(
     const Tensor input,
     int64_t dim,
     const Tensor out) {
+  ET_LOG_AND_RETURN_IF_FALSE(dim >= 0);
+
   // The input and out shall share same dtype
   ET_LOG_AND_RETURN_IF_FALSE(tensors_have_same_dtype(input, out));
 
@@ -882,11 +886,18 @@ void get_diagonal_copy_out_target_size(
 
   size_t diagonal_size = 0;
   if (offset >= 0) {
-    diagonal_size = std::min<size_t>(in.size(dim1), in.size(dim2) - offset);
+    if (in.size(dim2) <= offset) {
+      diagonal_size = 0;
+    } else {
+      diagonal_size = std::min<size_t>(in.size(dim1), in.size(dim2) - offset);
+    }
   } else {
-    diagonal_size = std::min<size_t>(in.size(dim1) + offset, in.size(dim2));
+    if (in.size(dim1) <= -offset) {
+      diagonal_size = 0;
+    } else {
+      diagonal_size = std::min<size_t>(in.size(dim1) + offset, in.size(dim2));
+    }
   }
-  diagonal_size = std::max<size_t>(diagonal_size, 0);
 
   size_t shift = 0;
   for (size_t d = 0; d < in.dim(); ++d) {

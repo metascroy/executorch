@@ -30,7 +30,6 @@ import java.util.Objects;
 import org.pytorch.executorch.EValue;
 import org.pytorch.executorch.Module;
 import org.pytorch.executorch.Tensor;
-import org.pytorch.executorch.TensorImageUtils;
 
 public class MainActivity extends Activity implements Runnable {
   private ImageView mImageView;
@@ -189,7 +188,7 @@ public class MainActivity extends Activity implements Runnable {
     final float[] inputs = inputTensor.getDataAsFloatArray();
 
     final long startTime = SystemClock.elapsedRealtime();
-    Tensor outputTensor = mModule.forward(EValue.from(inputTensor)).toTensor();
+    Tensor outputTensor = mModule.forward(EValue.from(inputTensor))[0].toTensor();
     final long inferenceTime = SystemClock.elapsedRealtime() - startTime;
     Log.d("ImageSegmentation", "inference time (ms): " + inferenceTime);
 

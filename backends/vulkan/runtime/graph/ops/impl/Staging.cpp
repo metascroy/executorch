@@ -8,29 +8,14 @@
 
 #include <executorch/backends/vulkan/runtime/graph/ops/impl/Staging.h>
 
-#include <executorch/backends/vulkan/runtime/graph/ops/OpUtils.h>
-#include <executorch/backends/vulkan/runtime/graph/ops/StagingUtils.h>
-#include <executorch/backends/vulkan/runtime/graph/ops/Utils.h>
+#include <executorch/backends/vulkan/runtime/graph/ops/utils/StagingUtils.h>
+
+#include <executorch/backends/vulkan/runtime/graph/ops/impl/utils/DimUtils.h>
+#include <executorch/backends/vulkan/runtime/graph/ops/impl/utils/TensorUtils.h>
 
 namespace at {
 namespace native {
 namespace vulkan {
-
-StagingParams create_staging_params(const vTensor& t) {
-  int32_t height = api::utils::safe_downcast<int32_t>(dim_at<Dim4D::Height>(t));
-  int32_t width = api::utils::safe_downcast<int32_t>(dim_at<Dim4D::Width>(t));
-  int32_t channels =
-      api::utils::safe_downcast<int32_t>(dim_at<Dim4D::Channel>(t));
-
-  int32_t plane_size = height * width;
-  int32_t c_depth = api::utils::div_up(channels, 4);
-
-  return {
-      api::utils::make_ivec3(t.extents()),
-      plane_size,
-      {c_depth, channels},
-  };
-}
 
 void add_staging_to_tensor_node(
     ComputeGraph& graph,
@@ -44,9 +29,6 @@ void add_staging_to_tensor_node(
   api::utils::uvec3 global_size = t_out.extents();
   api::utils::uvec3 local_size = adaptive_work_group_size(global_size);
 
-  api::UniformParamsBuffer params(
-      graph.context(), create_staging_params(t_out));
-
   graph.execute_nodes().emplace_back(new ExecuteNode(
       graph,
       shader,
@@ -54,7 +36,7 @@ void add_staging_to_tensor_node(
       local_size,
       {{out_tensor, api::MemoryAccessType::WRITE},
        {in_staging, api::MemoryAccessType::READ}},
-      std::move(params)));
+      {t_out.gpu_sizes_ubo(), t_out.cpu_sizes_ubo()}));
 }
 
 void add_tensor_to_staging_node(
@@ -69,27 +51,6 @@ void add_tensor_to_staging_node(
   api::utils::uvec3 global_size = t_in.extents();
   api::utils::uvec3 local_size = adaptive_work_group_size(global_size);
 
-  StagingParams sp = create_staging_params(t_in);
-  api::UniformParamsBuffer params(graph.context(), sp);
-
-  // TODO(T181194784): These are workgroup sizes for special cases. Refactor the
-  // calculation of workgroup sizes to a standalone function. We should use
-  // scalar type to get the shader name, and use the shader name to get the
-  // workgroup size.
-  if (t_in.dtype() == api::ScalarType::QUInt8 ||
-      t_in.dtype() == api::ScalarType::QInt8 || t_in.dtype() == api::kBool) {
-    if (sp.plane_size % 4 == 0) {
-      global_size.data[0u] = sp.plane_size / 4;
-      global_size.data[1u] = 1;
-      local_size.data[0u] *= local_size.data[1u];
-      local_size.data[1u] = 1;
-    } else {
-      uint32_t numel = t_in.numel();
-      global_size = {api::utils::div_up(numel, uint32_t(4)), 1u, 1u};
-      local_size = {64u, 1u, 1u};
-    }
-  }
-
   graph.execute_nodes().emplace_back(new ExecuteNode(
       graph,
       shader,
@@ -97,12 +58,15 @@ void add_tensor_to_staging_node(
       local_size,
       {{in_tensor, api::MemoryAccessType::READ},
        {out_staging, api::MemoryAccessType::WRITE}},
-      std::move(params)));
+      {t_in.gpu_sizes_ubo(), t_in.cpu_sizes_ubo()}));
 }
 
-ValueRef prepack(ComputeGraph& graph, const ValueRef vref) {
+ValueRef prepack(
+    ComputeGraph& graph,
+    const ValueRef vref,
+    const api::GPUMemoryLayout layout) {
   TensorRef& tref = graph.get_val(vref).toTensorRef();
-  ValueRef v = graph.add_tensor(tref.sizes, tref.dtype);
+  ValueRef v = graph.add_tensor(tref.sizes, tref.dtype, layout);
   vTensor t = graph.get_val(v).toTensor();
 
   api::ShaderInfo shader = get_nchw_to_image_shader(t);
@@ -110,18 +74,34 @@ ValueRef prepack(ComputeGraph& graph, const ValueRef vref) {
   api::utils::uvec3 global_size = t.extents();
   api::utils::uvec3 local_size = adaptive_work_group_size(global_size);
 
-  StagingParams sp = create_staging_params(t);
-  api::UniformParamsBuffer params(graph.context(), sp);
-
   graph.prepack_nodes().emplace_back(new PrepackNode(
-      graph, shader, global_size, local_size, vref, v, std::move(params)));
+      graph,
+      shader,
+      global_size,
+      local_size,
+      vref,
+      v,
+      {t.gpu_sizes_ubo(), t.cpu_sizes_ubo()}));
 
   return v;
 }
 
+ValueRef prepack_if_tensor_ref(
+    ComputeGraph& graph,
+    const ValueRef v,
+    const api::GPUMemoryLayout layout) {
+  if (graph.get_val(v).isTensorRef()) {
+    return prepack(graph, v, layout);
+  } else {
+    return v;
+  }
+}
+
 ValueRef prepack_if_tensor_ref(ComputeGraph& graph, const ValueRef v) {
   if (graph.get_val(v).isTensorRef()) {
-    return prepack(graph, v);
+    api::GPUMemoryLayout layout =
+        graph.suggested_memory_layout(graph.get_val(v).toTensorRef().sizes);
+    return prepack(graph, v, layout);
   } else {
     return v;
   }

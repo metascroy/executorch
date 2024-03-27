@@ -22,7 +22,6 @@ import java.io.IOException;
 import org.pytorch.executorch.EValue;
 import org.pytorch.executorch.Module;
 import org.pytorch.executorch.Tensor;
-import org.pytorch.executorch.TensorImageUtils;
 
 public class ClassificationActivity extends Activity implements Runnable {
 
@@ -71,7 +70,7 @@ public class ClassificationActivity extends Activity implements Runnable {
             TensorImageUtils.TORCHVISION_NORM_STD_RGB);
 
     // running the model
-    final Tensor outputTensor = module.forward(EValue.from(inputTensor)).toTensor();
+    final Tensor outputTensor = module.forward(EValue.from(inputTensor))[0].toTensor();
 
     // getting tensor content as java array of floats
     final float[] scores = outputTensor.getDataAsFloatArray();
