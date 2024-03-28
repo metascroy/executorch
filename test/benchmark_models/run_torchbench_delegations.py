@@ -189,7 +189,9 @@ def run(model_loader, delegation, model_names, reader_writer, skip_existing):
                 reader_writer.write_eval_example_inputs(
                     model_name, runner.stage_outputs.eval_inputs
                 )
-            reader_writer.write_tracker(model_name)
+
+        # Write tracker
+        reader_writer.write_tracker(model_name)
 
     print(
         f"\nThe following {len(non_extractable)} models could not be extracted: {non_extractable}"
@@ -244,6 +246,9 @@ def run_lite(model_loader, model_names, reader_writer, skip_existing):
             reader_writer.write_lite_model(model_name, bundled_opt_model)
         except Exception as e:
             print(f"Exception: {str(e)[0:50]}")
+
+        # Write tracker
+        reader_writer.write_tracker(model_name)
 
     print(
         f"\nThe following {len(non_extractable)} models could not be extracted: {non_extractable}"
