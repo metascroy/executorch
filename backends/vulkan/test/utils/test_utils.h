@@ -10,12 +10,12 @@
 
 #include <gtest/gtest.h>
 
-#include <ATen/native/vulkan/api/api.h>
+#include <executorch/backends/vulkan/runtime/api/api.h>
 
 #include <executorch/backends/vulkan/runtime/graph/ops/utils/ShaderNameUtils.h>
 #include <executorch/backends/vulkan/runtime/graph/ops/utils/StagingUtils.h>
 
-using namespace at::native::vulkan;
+using namespace vkcompute;
 
 #define CREATE_FLOAT_TEXTURE(sizes, allocate_memory) \
   vTensor(                                           \
@@ -80,6 +80,14 @@ void record_image_to_nchw_op(
     api::Context* const context,
     vTensor& v_src,
     api::VulkanBuffer& dst_buffer);
+
+void record_conv2d_prepack_weights_op(
+    api::Context* const context,
+    api::VulkanBuffer& src_buffer,
+    vTensor& v_dst,
+    const std::vector<int64_t>& original_sizes,
+    const std::vector<int64_t>& padded_sizes,
+    const bool transposed);
 
 void record_binary_op(
     api::Context* const context,

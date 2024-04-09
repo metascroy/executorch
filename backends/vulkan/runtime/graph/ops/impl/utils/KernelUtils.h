@@ -8,17 +8,13 @@
 
 #pragma once
 
-#ifdef USE_VULKAN_API
-
-#include <ATen/native/vulkan/api/api.h>
+#include <executorch/backends/vulkan/runtime/api/api.h>
 
 #include <executorch/backends/vulkan/runtime/graph/ComputeGraph.h>
 
 #include <executorch/backends/vulkan/runtime/graph/containers/Value.h>
 
-namespace at {
-namespace native {
-namespace vulkan {
+namespace vkcompute {
 
 struct KernelParams final {
   api::utils::ivec2 kernel_size;
@@ -27,18 +23,20 @@ struct KernelParams final {
   api::utils::ivec2 dilation;
 };
 
-int64_t calc_out_size(
-    const int64_t in_size,
-    const int64_t kernel_size,
-    const int64_t stride,
-    const int64_t padding,
-    const int64_t dilation,
-    const bool ceil_mode);
+KernelParams create_kernel_params(
+    ComputeGraph& graph,
+    const ValueRef weight,
+    const bool kernel_size_only,
+    const ValueRef stride,
+    const ValueRef padding,
+    const ValueRef dilation);
 
-api::utils::ivec2 reverse(ComputeGraph& graph, ValueRef vref);
+std::vector<int64_t> calc_out_sizes_hw(
+    ComputeGraph& graph,
+    const std::vector<int64_t>& in_sizes,
+    const ValueRef weight,
+    const bool kernel_size_only,
+    const std::vector<ValueRef>& args,
+    const bool transposed = false);
 
-} // namespace vulkan
-} // namespace native
-} // namespace at
-
-#endif /* USE_VULKAN_API */
+} // namespace vkcompute

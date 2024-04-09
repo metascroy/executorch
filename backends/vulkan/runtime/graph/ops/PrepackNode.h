@@ -8,15 +8,11 @@
 
 #pragma once
 
-#ifdef USE_VULKAN_API
-
-#include <ATen/native/vulkan/api/api.h>
+#include <executorch/backends/vulkan/runtime/api/api.h>
 
 #include <executorch/backends/vulkan/runtime/graph/containers/Value.h>
 
-namespace at {
-namespace native {
-namespace vulkan {
+namespace vkcompute {
 
 class ComputeGraph;
 
@@ -45,6 +41,7 @@ class PrepackNode final {
 
  protected:
   const api::ShaderInfo shader_;
+  api::ShaderInfo noop_shader_;
   const api::utils::uvec3 global_workgroup_size_;
   const api::utils::uvec3 local_workgroup_size_;
   const ValueRef tref_;
@@ -53,8 +50,4 @@ class PrepackNode final {
   std::vector<std::shared_ptr<api::UniformParamsBuffer>> params_;
 };
 
-} // namespace vulkan
-} // namespace native
-} // namespace at
-
-#endif /* USE_VULKAN_API */
+} // namespace vkcompute

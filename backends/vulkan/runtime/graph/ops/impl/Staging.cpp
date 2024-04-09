@@ -13,9 +13,7 @@
 #include <executorch/backends/vulkan/runtime/graph/ops/impl/utils/DimUtils.h>
 #include <executorch/backends/vulkan/runtime/graph/ops/impl/utils/TensorUtils.h>
 
-namespace at {
-namespace native {
-namespace vulkan {
+namespace vkcompute {
 
 void add_staging_to_tensor_node(
     ComputeGraph& graph,
@@ -65,9 +63,8 @@ ValueRef prepack(
     ComputeGraph& graph,
     const ValueRef vref,
     const api::GPUMemoryLayout layout) {
-  TensorRef& tref = graph.get_val(vref).toTensorRef();
-  ValueRef v = graph.add_tensor(tref.sizes, tref.dtype, layout);
-  vTensor t = graph.get_val(v).toTensor();
+  ValueRef v = graph.add_tensor_like(vref, layout);
+  vTensor& t = graph.get_val(v).toTensor();
 
   api::ShaderInfo shader = get_nchw_to_image_shader(t);
 
@@ -107,6 +104,4 @@ ValueRef prepack_if_tensor_ref(ComputeGraph& graph, const ValueRef v) {
   }
 }
 
-} // namespace vulkan
-} // namespace native
-} // namespace at
+} // namespace vkcompute

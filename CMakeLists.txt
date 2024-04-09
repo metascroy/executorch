@@ -56,45 +56,6 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug)
 endif()
 
-# --- cpuinfo
-set(CPUINFO_SOURCE_DIR "backends/xnnpack/third-party/cpuinfo")
-set(CPUINFO_BUILD_TOOLS
-    OFF
-    CACHE BOOL "")
-set(CPUINFO_BUILD_UNIT_TESTS
-    OFF
-    CACHE BOOL "")
-set(CPUINFO_BUILD_MOCK_TESTS
-    OFF
-    CACHE BOOL "")
-set(CPUINFO_BUILD_BENCHMARKS
-    OFF
-    CACHE BOOL "")
-set(CPUINFO_LIBRARY_TYPE
-    "static"
-    CACHE STRING "")
-set(CPUINFO_LOG_LEVEL
-    "error"
-    CACHE STRING "")
-set(CLOG_SOURCE_DIR "${CPUINFO_SOURCE_DIR}/deps/clog")
-add_subdirectory("${CPUINFO_SOURCE_DIR}")
-
-# --- pthreadpool
-set(PTHREADPOOL_SOURCE_DIR "backends/xnnpack/third-party/pthreadpool")
-set(PTHREADPOOL_BUILD_TESTS
-    OFF
-    CACHE BOOL "")
-set(PTHREADPOOL_BUILD_BENCHMARKS
-    OFF
-    CACHE BOOL "")
-set(PTHREADPOOL_LIBRARY_TYPE
-    "static"
-    CACHE STRING "")
-set(PTHREADPOOL_ALLOW_DEPRECATED_API
-    ON
-    CACHE BOOL "")
-add_subdirectory("${PTHREADPOOL_SOURCE_DIR}")
-
 # ------------------------------ OPTIONS -------------------------------------
 # WARNING: Please don't add example specific options in this CMakeLists.txt.
 # Instead please use `find_package(executorch REQUIRED)` in the example
@@ -210,6 +171,66 @@ option(EXECUTORCH_BUILD_SIZE_TEST "Build the size test" OFF)
 option(EXECUTORCH_BUILD_XNNPACK "Build the XNNPACK backend" OFF)
 
 option(EXECUTORCH_BUILD_VULKAN "Build the Vulkan backend" OFF)
+
+#
+# pthreadpool: build pthreadpool library. Disable on unsupported platforms
+#
+cmake_dependent_option(EXECUTORCH_BUILD_PTHREADPOOL "Build pthreadpool library."
+                       ON "NOT EXECUTORCH_BUILD_ARM_BAREMETAL" OFF)
+
+#
+# cpuinfo: build cpuinfo library. Disable on unsupported platforms
+#
+cmake_dependent_option(EXECUTORCH_BUILD_CPUINFO "Build cpuinfo library." ON
+                       "NOT EXECUTORCH_BUILD_ARM_BAREMETAL" OFF)
+
+if(EXECUTORCH_BUILD_CPUINFO)
+  # --- cpuinfo
+  set(CPUINFO_SOURCE_DIR "backends/xnnpack/third-party/cpuinfo")
+  set(CPUINFO_BUILD_TOOLS
+      OFF
+      CACHE BOOL "")
+  set(CPUINFO_BUILD_UNIT_TESTS
+      OFF
+      CACHE BOOL "")
+  set(CPUINFO_BUILD_MOCK_TESTS
+      OFF
+      CACHE BOOL "")
+  set(CPUINFO_BUILD_BENCHMARKS
+      OFF
+      CACHE BOOL "")
+  set(CPUINFO_LIBRARY_TYPE
+      "static"
+      CACHE STRING "")
+  set(CPUINFO_LOG_LEVEL
+      "error"
+      CACHE STRING "")
+  set(CLOG_SOURCE_DIR "${CPUINFO_SOURCE_DIR}/deps/clog")
+  add_subdirectory("${CPUINFO_SOURCE_DIR}")
+endif()
+
+if(EXECUTORCH_BUILD_PTHREADPOOL)
+  # --- pthreadpool
+  set(PTHREADPOOL_SOURCE_DIR "backends/xnnpack/third-party/pthreadpool")
+  set(PTHREADPOOL_BUILD_TESTS
+      OFF
+      CACHE BOOL "")
+  set(PTHREADPOOL_BUILD_BENCHMARKS
+      OFF
+      CACHE BOOL "")
+  set(PTHREADPOOL_LIBRARY_TYPE
+      "static"
+      CACHE STRING "")
+  set(PTHREADPOOL_ALLOW_DEPRECATED_API
+      ON
+      CACHE BOOL "")
+  if(APPLE)
+    set(PTHREADPOOL_SYNC_PRIMITIVE
+       "condvar"
+       CACHE STRING "")
+  endif()
+  add_subdirectory("${PTHREADPOOL_SOURCE_DIR}")
+endif()
 
 if(NOT PYTHON_EXECUTABLE)
   resolve_python_executable()
@@ -331,22 +352,26 @@ add_subdirectory(schema)
 # Only contains primitive operators; does not contain portable kernels or other
 # full operators. Does not contain any backends.
 #
-
-add_library(executorch ${_executorch__srcs})
-target_link_libraries(executorch PRIVATE program_schema)
-target_link_options_shared_lib(executorch)
+add_library(executorch_no_prim_ops ${_executorch_no_prim_ops__srcs})
+target_link_libraries(executorch_no_prim_ops PRIVATE program_schema)
 # Check if dl exists for this toolchain and only then link it.
 find_library(DL_LIBRARY_EXISTS NAMES dl)
 # Check if the library was found
 if(DL_LIBRARY_EXISTS)
-  target_link_libraries(executorch PRIVATE dl) # For dladdr()
+  target_link_libraries(executorch_no_prim_ops PRIVATE dl) # For dladdr()
 endif()
-target_include_directories(executorch PUBLIC ${_common_include_directories})
-target_compile_options(executorch PUBLIC ${_common_compile_options})
+target_include_directories(executorch_no_prim_ops PUBLIC ${_common_include_directories})
+target_compile_options(executorch_no_prim_ops PUBLIC ${_common_compile_options})
 if(MAX_KERNEL_NUM)
-  target_compile_definitions(executorch
+  target_compile_definitions(executorch_no_prim_ops
                              PRIVATE MAX_KERNEL_NUM=${MAX_KERNEL_NUM})
 endif()
+
+add_library(executorch ${_executorch__srcs})
+target_link_libraries(executorch PRIVATE executorch_no_prim_ops)
+target_include_directories(executorch PUBLIC ${_common_include_directories})
+target_compile_options(executorch PUBLIC ${_common_compile_options})
+target_link_options_shared_lib(executorch)
 
 #
 # portable_ops_lib: A library to register core ATen ops using portable kernels,
@@ -385,7 +410,7 @@ endif()
 # Install `executorch` library as well as `executorch-config.cmake` under
 # ${CMAKE_INSTALL_PREFIX}/
 install(
-  TARGETS executorch
+  TARGETS executorch executorch_no_prim_ops
   DESTINATION lib
   INCLUDES
   DESTINATION ${_common_include_directories})
@@ -492,7 +517,9 @@ if(EXECUTORCH_BUILD_PYBIND)
   endif()
 
   if(EXECUTORCH_BUILD_XNNPACK)
-    set(PYBIND_LINK_XNNPACK "xnnpack_backend")
+    # need to explicitly specify XNNPACK here
+    # otherwise uses XNNPACK symbols from libtorch_cpu
+    set(PYBIND_LINK_XNNPACK xnnpack_backend XNNPACK)
   endif()
 
   # find pytorch lib, to allow pybind to take at::Tensor as input/output

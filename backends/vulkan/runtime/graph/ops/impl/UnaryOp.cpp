@@ -15,9 +15,7 @@
 
 #include <executorch/backends/vulkan/runtime/graph/ops/utils/ShaderNameUtils.h>
 
-namespace at {
-namespace native {
-namespace vulkan {
+namespace vkcompute {
 
 constexpr float kDummyFloat = -1.0f;
 const std::string kClampShaderName = "clamp";
@@ -84,8 +82,8 @@ float get_val_or_inf(ComputeGraph& graph, const ValueRef& val, bool max) {
     return add_unary_op_node(                                            \
         graph,                                                           \
         args[0],                                                         \
-        get_val_or_inf(graph, args[1], /*max =*/false),                  \
-        get_val_or_inf(graph, args[2], /*max =*/true),                   \
+        get_val_or_inf(graph, args[1], /*max = */ false),                \
+        get_val_or_inf(graph, args[2], /*max = */ true),                 \
         args[3],                                                         \
         kClampShaderName);                                               \
   }
@@ -117,6 +115,4 @@ REGISTER_OPERATORS {
   VK_REGISTER_OP(aten.tanh.default, tanh);
 }
 
-} // namespace vulkan
-} // namespace native
-} // namespace at
+} // namespace vkcompute
