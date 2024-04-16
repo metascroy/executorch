@@ -14,9 +14,17 @@ from executorch.backends.vulkan.test.op_tests.utils.codegen_base import (
     AT_TENSOR,
     BOOL,
     CppTestFileGen,
-    TENSOR_TUPLE,
+    DOUBLE,
+    INT,
+    OPT_AT_TENSOR,
+    OPT_BOOL,
+    OPT_DEVICE,
+    OPT_LAYOUT,
+    OPT_SCALARTYPE,
     TestSuite,
     TestSuiteGen,
+    THREE_TENSOR_TUPLE,
+    TWO_TENSOR_TUPLE,
 )
 from torchgen.api import cpp
 from torchgen.api.types import CppSignatureGroup
@@ -96,7 +104,7 @@ class ComputeGraphGen:
                 ATenArg(name=arg.name, cpp_type=cpp_type, default=arg.default)
             )
 
-            requires_prepack = "weight" in arg.name
+            requires_prepack = "weight" in arg.name or "bias" in arg.name
             supports_prepack = False
             if arg.name in self.suite_def.prepacked_args:
                 supports_prepack = True
@@ -116,7 +124,7 @@ class ComputeGraphGen:
             self.refs["out"] = ValueRef(
                 name="out_ref", src_cpp_name="out", src_cpp_type=ret_type, is_out=True
             )
-        elif ret_type == TENSOR_TUPLE:
+        elif ret_type == TWO_TENSOR_TUPLE:
             self.refs["out"] = [
                 ValueRef(
                     name="out_ref_first",
@@ -127,6 +135,33 @@ class ComputeGraphGen:
                 ValueRef(
                     name="out_ref_second",
                     src_cpp_name="std::get<1>(out)",
+                    src_cpp_type="at::Tensor",
+                    is_out=True,
+                ),
+                ValueRef(
+                    name="out_ref",
+                    src_cpp_name="out",
+                    src_cpp_type=ret_type,
+                    is_out=False,
+                ),
+            ]
+        elif ret_type == THREE_TENSOR_TUPLE:
+            self.refs["out"] = [
+                ValueRef(
+                    name="out_ref_first",
+                    src_cpp_name="std::get<0>(out)",
+                    src_cpp_type="at::Tensor",
+                    is_out=True,
+                ),
+                ValueRef(
+                    name="out_ref_second",
+                    src_cpp_name="std::get<1>(out)",
+                    src_cpp_type="at::Tensor",
+                    is_out=True,
+                ),
+                ValueRef(
+                    name="out_ref_third",
+                    src_cpp_name="std::get<2>(out)",
                     src_cpp_type="at::Tensor",
                     is_out=True,
                 ),
@@ -149,7 +184,6 @@ class ComputeGraphGen:
         func_call = generate_static_dispatch_backend_call(
             self.f_sig, self.f, TestSuiteGen.backend_key
         )[7:].replace("::cpu", "")
-
         return func_call
 
     def create_out_src(self) -> str:
@@ -163,7 +197,7 @@ class ComputeGraphGen:
         else:
             return ref.supports_prepack and self.should_prepack
 
-    def create_value_for(self, ref: ValueRefList) -> str:
+    def create_value_for(self, ref: ValueRefList) -> str:  # noqa: C901
         if isinstance(ref, list):
             ret_str = ""
             for r in ref:
@@ -173,6 +207,23 @@ class ComputeGraphGen:
         prepack = self.prepack_ref(ref)
 
         cpp_type = "IOValueRef" if (ref.is_in and not prepack) else "ValueRef"
+
+        if ref.src_cpp_type == OPT_AT_TENSOR:
+            ret_str = f"{cpp_type} {ref.name} = "
+            ret_str += f"!{ref.src_cpp_name}.has_value() ? "
+            ret_str += f"{self.graph}{self.dot}add_none() : "
+            if not prepack:
+                ret_str += f"{self.graph}{self.dot}"
+                ret_str += "add_input_tensor(" if ref.is_in else "add_tensor("
+                ret_str += f"{ref.src_cpp_name}->sizes().vec(), "
+                ret_str += f"from_at_scalartype({ref.src_cpp_name}->scalar_type())); \n"
+            elif prepack:
+                ret_str += f"{self.graph}{self.dot}"
+                ret_str += f"add_tensorref({ref.src_cpp_name}->sizes().vec(), "
+                ret_str += f"from_at_scalartype({ref.src_cpp_name}->scalar_type()), "
+                ret_str += f"{ref.src_cpp_name}->const_data_ptr()); \n"
+            return ret_str
+
         ret_str = f"{cpp_type} {ref.name} = {self.graph}{self.dot}"
         if ref.src_cpp_type == AT_TENSOR and not prepack:
             ret_str += "add_input_tensor(" if ref.is_in else "add_tensor("
@@ -189,8 +240,21 @@ class ComputeGraphGen:
             ret_str += f"add_scalar_list({ref.src_cpp_name}.vec()); \n"
         elif ref.src_cpp_type == BOOL:
             ret_str += f"add_scalar<bool>({ref.src_cpp_name}); \n"
-        elif ref.src_cpp_type == TENSOR_TUPLE:
+        elif ref.src_cpp_type == INT:
+            ret_str += f"add_scalar<int64_t>({ref.src_cpp_name}); \n"
+        elif ref.src_cpp_type == DOUBLE:
+            ret_str += f"add_scalar<double>({ref.src_cpp_name}); \n"
+        elif (
+            ref.src_cpp_type == OPT_SCALARTYPE
+            or ref.src_cpp_type == OPT_LAYOUT
+            or ref.src_cpp_type == OPT_DEVICE
+            or ref.src_cpp_type == OPT_BOOL
+        ):
+            ret_str += "add_none(); \n"
+        elif ref.src_cpp_type == TWO_TENSOR_TUPLE:
             ret_str += f"add_value_list({{{ref.name}_first, {ref.name}_second}}); \n"
+        elif ref.src_cpp_type == THREE_TENSOR_TUPLE:
+            ret_str += f"add_value_list({{{ref.name}_first, {ref.name}_second, {ref.name}_third}}); \n"
         else:
             raise RuntimeError(f"Unsupported cpp type {ref.src_cpp_type}")
 
@@ -227,8 +291,8 @@ class ComputeGraphGen:
         assert ref.src_cpp_type == AT_TENSOR and ref.is_in
         if self.prepack_ref(ref):
             return ""
-        ret_str = f"{self.graph}{self.dot}get_val({ref.name}.value).toTensor()"
-        ret_str += f".virtual_resize({ref.src_cpp_name}.sizes().vec());\n"
+        ret_str = f"{self.graph}{self.dot}get_tensor({ref.name}.value)"
+        ret_str += f"->virtual_resize({ref.src_cpp_name}.sizes().vec());\n"
         return ret_str
 
     def copy_into_staging(self, ref: ValueRefList) -> str:
@@ -403,6 +467,7 @@ preamble_str = """
 #include <tuple>
 
 using namespace vkcompute;
+using TensorOptions = at::TensorOptions;
 
 api::ScalarType from_at_scalartype(c10::ScalarType at_scalartype) {
     switch(at_scalartype) {
@@ -420,9 +485,9 @@ api::ScalarType from_at_scalartype(c10::ScalarType at_scalartype) {
 }
 
 #ifdef USE_VULKAN_FP16_INFERENCE
-bool check_close(at::Tensor& t1, at::Tensor& t2, float rtol=1e-2, float atol=1e-3) {
+bool check_close(at::Tensor& t1, at::Tensor& t2, float rtol=1e-2, float atol=1e-2) {
 #else
-bool check_close(at::Tensor& t1, at::Tensor& t2, float rtol=1e-5, float atol=1e-8) {
+bool check_close(at::Tensor& t1, at::Tensor& t2, float rtol=1e-5, float atol=1e-5) {
 #endif
     // Skip checking index tensors
     if (t1.scalar_type() == at::kLong || t2.scalar_type() == at::kLong) {

@@ -17,11 +17,11 @@
 namespace vkcompute {
 
 api::ShaderInfo get_noop_shader(ComputeGraph& graph, const ValueRef packed) {
-  std::stringstream noop_shader_name;
-  noop_shader_name << "no_op";
-  apply_ndim_suffix(noop_shader_name, graph.get_val(packed).toTensor());
-  apply_dtype_suffix(noop_shader_name, graph.get_val(packed).toTensor());
-  return VK_KERNEL_FROM_STR(noop_shader_name.str());
+  std::string noop_shader_name("no_op");
+  vTensorPtr t_packed = graph.get_tensor(packed);
+  add_ndim_suffix(noop_shader_name, *t_packed);
+  add_dtype_suffix(noop_shader_name, *t_packed);
+  return VK_KERNEL_FROM_STR(noop_shader_name);
 }
 
 PrepackNode::PrepackNode(
@@ -43,16 +43,32 @@ PrepackNode::PrepackNode(
   graph.update_descriptor_counts(noop_shader_, /*execute = */ false);
 }
 
+api::StorageBuffer PrepackNode::create_staging_buffer(ComputeGraph* graph) {
+  vTensorPtr packed = graph->get_tensor(packed_);
+
+  // If no TensorRef is provided, create a staging buffer of zeros according to
+  // the vTensor metadata.
+  if (graph->val_is_none(tref_)) {
+    size_t numel = api::utils::multiply_integers(packed->sizes());
+    api::StorageBuffer staging(graph->context(), packed->dtype(), numel);
+    size_t nbytes = numel * api::element_size(packed->dtype());
+    set_staging_zeros(staging, nbytes);
+    return staging;
+  }
+
+  TensorRefPtr tref = graph->get_tref(tref_);
+  size_t numel = api::utils::multiply_integers(tref->sizes);
+  api::StorageBuffer staging(graph->context(), tref->dtype, numel);
+  size_t nbytes = numel * api::element_size(tref->dtype);
+  copy_ptr_to_staging(tref->data, staging, nbytes);
+  return staging;
+}
+
 void PrepackNode::encode(ComputeGraph* graph) {
   api::Context* const context = graph->context();
 
-  TensorRef& tref = graph->get_val(tref_).toTensorRef();
-  vTensor& packed = graph->get_val(packed_).toTensor();
-
-  size_t numel = api::utils::multiply_integers(tref.sizes);
-  api::StorageBuffer staging(graph->context(), tref.dtype, numel);
-  size_t nbytes = numel * api::element_size(tref.dtype);
-  copy_ptr_to_staging(tref.data, staging, nbytes);
+  vTensorPtr packed = graph->get_tensor(packed_);
+  api::StorageBuffer staging = create_staging_buffer(graph);
 
   std::unique_lock<std::mutex> cmd_lock = context->dispatch_lock();
 
@@ -63,7 +79,7 @@ void PrepackNode::encode(ComputeGraph* graph) {
 
     uint32_t idx = 0;
     bind_tensor_to_descriptor_set(
-        packed,
+        *packed,
         pipeline_barrier,
         api::MemoryAccessType::WRITE,
         descriptor_set,
@@ -76,7 +92,7 @@ void PrepackNode::encode(ComputeGraph* graph) {
   }
 
   // Submit a compute shader that performs a no-op with the packed tensor in
-  // order to trigger a image layout transition from GENERAL to
+  // order to trigger an image layout transition from GENERAL to
   // READ_ONLY_OPTIMAL. This ensures that future uses of the tensor will be
   // bound with the correct image layout.
   {
@@ -85,7 +101,7 @@ void PrepackNode::encode(ComputeGraph* graph) {
         context->get_descriptor_set(noop_shader_, {1, 1, 1});
 
     bind_tensor_to_descriptor_set(
-        packed,
+        *packed,
         pipeline_barrier,
         api::MemoryAccessType::READ,
         descriptor_set,

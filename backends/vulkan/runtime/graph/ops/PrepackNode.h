@@ -46,8 +46,10 @@ class PrepackNode final {
   const api::utils::uvec3 local_workgroup_size_;
   const ValueRef tref_;
   const ValueRef packed_;
-  // TODO(T180906457): allow re-computing param buffers.
   std::vector<std::shared_ptr<api::UniformParamsBuffer>> params_;
+
+ private:
+  api::StorageBuffer create_staging_buffer(ComputeGraph* graph);
 };
 
 } // namespace vkcompute

@@ -29,7 +29,8 @@ class Runner {
   explicit Runner(
       const std::string& model_path,
       const std::string& tokenizer_path,
-      const float temperature = 0.8f);
+      const float temperature = 0.8f,
+      bool use_tiktoken = false);
 
   struct Stats {
     // Scaling factor for timestamps - in this case, we use ms.
@@ -69,7 +70,7 @@ class Runner {
  private:
   // metadata
   template <typename T>
-  T getMetadataHelper(std::string method_name, T default_val);
+  T getMetadataHelper(const std::string& method_name, T default_val);
   template <typename T>
   int32_t
   logitsToToken(const exec_aten::Tensor& logits_tensor, int64_t pos, T _);
@@ -85,6 +86,7 @@ class Runner {
   int32_t n_bos_;
   int32_t n_eos_;
   int32_t max_seq_len_;
+  bool use_tiktoken_;
   bool use_kv_cache_;
   bool use_sdpa_with_kv_cache_;
   bool append_eos_;

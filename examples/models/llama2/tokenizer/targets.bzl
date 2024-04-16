@@ -4,10 +4,14 @@ def define_common_targets():
     runtime.cxx_library(
         name = "tokenizer",
         srcs = [
-            "tokenizer.cpp",
+            "bpe_tokenizer.cpp",
+            "tiktoken.cpp",
         ],
         exported_headers = [
             "tokenizer.h",
+            "bpe_tokenizer.h",
+            "tiktoken.h",
+            "base64.h",
         ],
         exported_deps = [
             "//executorch/runtime/core/exec_aten:lib",
@@ -15,6 +19,9 @@ def define_common_targets():
         ],
         visibility = [
             "@EXECUTORCH_CLIENTS",
+        ],
+        exported_external_deps = [
+            "re2",
         ],
     )
 

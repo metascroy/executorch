@@ -63,15 +63,15 @@ void record_conv2d_prepack_weights_op(
     const bool transposed) {
   api::PipelineBarrier pipeline_barrier{};
 
-  std::stringstream kernel_name;
+  std::string kernel_name;
   if (transposed) {
-    kernel_name << "conv_transpose2d";
+    kernel_name = "conv_transpose2d";
   } else {
-    kernel_name << "conv2d";
+    kernel_name = "conv2d";
   }
-  kernel_name << "_prepack_weights";
-  apply_dtype_suffix(kernel_name, v_dst);
-  api::ShaderInfo shader = VK_KERNEL_FROM_STR(kernel_name.str());
+  kernel_name += "_prepack_weights";
+  add_dtype_suffix(kernel_name, v_dst);
+  api::ShaderInfo shader = VK_KERNEL_FROM_STR(kernel_name);
 
   api::UniformParamsBuffer original_sizes_ubo(
       context, api::utils::make_ivec4(original_sizes, /*reverse = */ true));
@@ -100,13 +100,12 @@ void record_binary_op(
     vTensor& v_in1,
     vTensor& v_in2,
     vTensor& v_dst) {
-  std::stringstream kernel_name;
-  kernel_name << "binary_" << op_name << "_nobroadcast__test";
-  apply_dtype_suffix(kernel_name, v_dst);
+  std::string kernel_name = "binary_" + op_name + "_nobroadcast__test";
+  add_dtype_suffix(kernel_name, v_dst);
 
   api::PipelineBarrier pipeline_barrier{};
   context->submit_compute_job(
-      VK_KERNEL_FROM_STR(kernel_name.str()),
+      VK_KERNEL_FROM_STR(kernel_name),
       pipeline_barrier,
       v_dst.virtual_extents(),
       adaptive_work_group_size(v_dst.virtual_extents()),
@@ -163,7 +162,7 @@ void fill_vtensor(
     const IOValueRef idx,
     float val,
     bool iota) {
-  std::vector<float> data(graph.get_val(idx.value).toTensor().gpu_numel());
+  std::vector<float> data(graph.get_tensor(idx.value)->gpu_numel());
   if (iota) {
     std::iota(data.begin(), data.end(), val);
   } else {
@@ -232,13 +231,13 @@ void execute_graph_and_check_output(
 
   for (size_t i = 0; i < graph.outputs().size(); ++i) {
     IOValueRef out_ioval = graph.outputs().at(i);
-    vTensor& t_out = graph.get_val(out_ioval.value).toTensor();
+    vTensorPtr t_out = graph.get_tensor(out_ioval.value);
 
-    std::vector<float> output_data(t_out.gpu_numel());
+    std::vector<float> output_data(t_out->gpu_numel());
     graph.copy_from_staging(
         out_ioval.staging, output_data.data(), output_data.size());
 
-    for (size_t j = 0; j < t_out.numel(); ++j) {
+    for (size_t j = 0; j < t_out->numel(); ++j) {
       CHECK_VALUE(output_data, j, expected_outputs.at(i));
     }
   }

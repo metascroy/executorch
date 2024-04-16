@@ -15,11 +15,19 @@ from torchgen.model import Argument, NativeFunction
 ## ATen code patterns ##
 ########################
 
-AT_TENSOR = "at::Tensor"
-AT_SCALAR = "at::Scalar"
 AT_INT_ARRAY_REF = "at::IntArrayRef"
+AT_SCALAR = "at::Scalar"
+AT_TENSOR = "at::Tensor"
 BOOL = "bool"
-TENSOR_TUPLE = "::std::tuple<at::Tensor,at::Tensor>"
+DOUBLE = "double"
+INT = "int64_t"
+OPT_AT_TENSOR = "::std::optional<at::Tensor>"
+OPT_BOOL = "::std::optional<bool>"
+OPT_DEVICE = "::std::optional<at::Device>"
+OPT_LAYOUT = "::std::optional<at::Layout>"
+OPT_SCALARTYPE = "::std::optional<at::ScalarType>"
+TWO_TENSOR_TUPLE = "::std::tuple<at::Tensor,at::Tensor>"
+THREE_TENSOR_TUPLE = "::std::tuple<at::Tensor,at::Tensor,at::Tensor>"
 
 ###########################
 ## Test Suite definition ##
@@ -116,12 +124,28 @@ class TestSuiteGen:
 
         if cpp_type == AT_TENSOR:
             ret_str += f"make_rand_tensor({init_list_str(data)}, test_dtype);"
+        elif cpp_type == OPT_AT_TENSOR:
+            if str(data) == "None":
+                ret_str += "std::nullopt;"
+            else:
+                ret_str += f"make_rand_tensor({init_list_str(data)}, test_dtype);"
         elif cpp_type == AT_SCALAR:
             ret_str += f"{data};"
         elif cpp_type == AT_INT_ARRAY_REF:
             ret_str += f"{init_list_str(data)};"
         elif cpp_type == BOOL:
             ret_str += f"{str(data).lower()};"
+        elif cpp_type == INT:
+            ret_str += f"{str(data).lower()};"
+        elif cpp_type == DOUBLE:
+            ret_str += f"{str(data).lower()};"
+        elif (
+            cpp_type == OPT_SCALARTYPE
+            or cpp_type == OPT_LAYOUT
+            or cpp_type == OPT_DEVICE
+            or cpp_type == OPT_BOOL
+        ):
+            ret_str += "std::nullopt;"
         else:
             raise RuntimeError(f"Unsupported cpp type {cpp_type}")
         return ret_str + "\n"
